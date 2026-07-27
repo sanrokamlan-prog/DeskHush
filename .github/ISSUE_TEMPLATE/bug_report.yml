@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible DeskHush problem
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先移除用户名、私人路径和敏感命令。安全漏洞请使用 Security Advisory，不要公开提交。
+  - type: input
+    id: version
+    attributes:
+      label: DeskHush version
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+  - type: dropdown
+    id: privilege
+    attributes:
+      label: Running mode
+      options:
+        - Standard user
+        - Administrator
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the affected module, entry type, scope, and exact status message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Attach redacted screenshots or state excerpts only when needed.

@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Version>0.1.0</Version>
+    <Authors>sanrokamlan-prog</Authors>
+    <RepositoryUrl>https://github.com/sanrokamlan-prog/DeskHush</RepositoryUrl>
+    <Copyright>Copyright (c) 2026 DeskHush contributors</Copyright>
+  </PropertyGroup>
+</Project>

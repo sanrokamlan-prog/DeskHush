@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish Windows release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Validate tag version
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content -LiteralPath 'Directory.Build.props'
+          $version = @($props.Project.PropertyGroup.Version) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'Directory.Build.props contains no Version value.'
+          }
+          $expectedTag = "v$version"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag '$env:GITHUB_REF_NAME' does not match project version '$expectedTag'."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build release archive
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/build-release.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $archive = "artifacts/release/DeskHush-v$env:RELEASE_VERSION-win-x64.zip"
+          $checksums = 'artifacts/release/SHA256SUMS.txt'
+          gh --version
+          gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME $archive $checksums --clobber --repo $env:GITHUB_REPOSITORY
+          }
+          else {
+            gh release create $env:GITHUB_REF_NAME $archive $checksums `
+              --repo $env:GITHUB_REPOSITORY `
+              --title "DeskHush $env:GITHUB_REF_NAME" `
+              --generate-notes `
+              --verify-tag
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release command failed with exit code $LASTEXITCODE."
+          }

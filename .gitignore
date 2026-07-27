@@ -1,0 +1,33 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Aa]rtifacts/
+[Tt]est[Rr]esults/
+
+# IDE and user state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local .NET and NuGet state
+.dotnet/
+.nuget/
+.appdata/
+packages/
+*.nupkg
+*.snupkg
+
+# Generated release files
+*.zip
+SHA256SUMS.txt
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
