@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="DeskHush"
+        Icon="Assets/DeskHush.ico"
         Width="1180"
         Height="760"
         MinWidth="980"
@@ -58,7 +59,7 @@
 
                 <StackPanel Grid.Row="2" Margin="24,0,18,16" VerticalAlignment="Bottom">
                     <TextBlock Foreground="#D6DADB" Text="{Binding AdministratorStatus}" />
-                    <TextBlock Margin="0,4,0,0" FontSize="11" Foreground="#7F898B" Text="v0.1.0 · Windows x64" />
+                    <TextBlock Margin="0,4,0,0" FontSize="11" Foreground="#7F898B" Text="v0.2.0 · Windows x64" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -139,15 +140,46 @@
                             <Grid>
                                 <Grid.RowDefinitions><RowDefinition Height="54" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                 <Grid Margin="14,0">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="当前窗口" />
-                                    <TextBox Grid.Column="1" Margin="14,0,10,0" VerticalAlignment="Center" Text="{Binding WindowSearchText, UpdateSourceTrigger=PropertyChanged}" />
-                                    <Button Grid.Column="2" Content="&#xE72C;" Command="{Binding RefreshWindowsCommand}" Style="{StaticResource IconButton}" ToolTip="刷新窗口" />
-                                    <Button Grid.Column="3" Margin="8,0,0,0" Content="&#xE710;" Command="{Binding AddRuleFromWindowCommand}" Style="{StaticResource IconButton}" ToolTip="从选中窗口创建规则" />
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="目标窗口" />
+                                    <Button Grid.Column="1" Width="108" Click="CaptureWindow_Click" Style="{StaticResource SecondaryButton}" ToolTip="冻结桌面并选择一个窗口">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Margin="0,0,7,0" FontFamily="Segoe MDL2 Assets" Text="&#xE722;" /><TextBlock Text="桌面抓取" /></StackPanel>
+                                    </Button>
                                 </Grid>
-                                <DataGrid Grid.Row="1" ItemsSource="{Binding VisibleWindows}" SelectedItem="{Binding SelectedWindow}" IsReadOnly="True">
-                                    <DataGrid.Columns><DataGridTextColumn Width="0.85*" Header="程序" Binding="{Binding ProcessName}" /><DataGridTextColumn Width="1.2*" Header="窗口标题" Binding="{Binding Title}" /><DataGridTextColumn Width="0.9*" Header="窗口类" Binding="{Binding ClassName}" /></DataGrid.Columns>
-                                </DataGrid>
+                                <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
+                                    <TabItem Header="当前窗口">
+                                        <Grid>
+                                            <Grid.RowDefinitions><RowDefinition Height="48" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                            <Grid Margin="12,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBox Margin="0,0,10,0" VerticalAlignment="Center" Text="{Binding WindowSearchText, UpdateSourceTrigger=PropertyChanged}" ToolTip="按程序、标题或窗口类筛选" />
+                                                <Button Grid.Column="1" Content="&#xE72C;" Command="{Binding RefreshWindowsCommand}" Style="{StaticResource IconButton}" ToolTip="刷新窗口" />
+                                                <Button Grid.Column="2" Margin="8,0,0,0" Content="&#xE710;" Command="{Binding AddRuleFromWindowCommand}" Style="{StaticResource IconButton}" ToolTip="从选中窗口创建规则" />
+                                            </Grid>
+                                            <DataGrid Grid.Row="1" ItemsSource="{Binding VisibleWindows}" SelectedItem="{Binding SelectedWindow}" IsReadOnly="True">
+                                                <DataGrid.Columns><DataGridTextColumn Width="0.8*" Header="程序" Binding="{Binding ProcessName}" /><DataGridTextColumn Width="1.25*" Header="窗口标题" Binding="{Binding Title}" /><DataGridTextColumn Width="86" Header="尺寸" Binding="{Binding SizeText}" /></DataGrid.Columns>
+                                            </DataGrid>
+                                        </Grid>
+                                    </TabItem>
+                                    <TabItem Header="窗口记录">
+                                        <Grid>
+                                            <Grid.RowDefinitions><RowDefinition Height="48" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                            <Grid Margin="12,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+                                                    <TextBlock Margin="0,0,7,0" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" Text="{Binding WindowRecordingStatus}" />
+                                                    <ToggleButton IsChecked="{Binding IsWindowRecordingEnabled}" Style="{StaticResource SwitchToggle}" ToolTip="后台记录新出现的窗口" />
+                                                </StackPanel>
+                                                <TextBox Grid.Column="1" Margin="12,0,10,0" VerticalAlignment="Center" Text="{Binding WindowRecordSearchText, UpdateSourceTrigger=PropertyChanged}" ToolTip="筛选窗口记录" />
+                                                <Button Grid.Column="2" Content="&#xE74D;" Command="{Binding ClearWindowRecordsCommand}" Style="{StaticResource IconButton}" ToolTip="清空窗口记录" />
+                                                <Button Grid.Column="3" Margin="8,0,0,0" Content="&#xE710;" Command="{Binding AddRuleFromRecordCommand}" Style="{StaticResource IconButton}" ToolTip="从选中记录创建规则" />
+                                            </Grid>
+                                            <DataGrid Grid.Row="1" ItemsSource="{Binding WindowRecords}" SelectedItem="{Binding SelectedWindowRecord}" IsReadOnly="True">
+                                                <DataGrid.Columns><DataGridTextColumn Width="68" Header="时间" Binding="{Binding TimeText}" /><DataGridTextColumn Width="0.75*" Header="程序" Binding="{Binding ProcessName}" /><DataGridTextColumn Width="1.2*" Header="窗口标题" Binding="{Binding Title}" /><DataGridTextColumn Width="86" Header="尺寸" Binding="{Binding SizeText}" /></DataGrid.Columns>
+                                            </DataGrid>
+                                        </Grid>
+                                    </TabItem>
+                                </TabControl>
                             </Grid>
                         </Border>
                         <Border Grid.Column="1" Margin="10,0,0,0" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
@@ -218,13 +250,27 @@
                                     <Grid Height="58" Margin="16,0"><TextBlock VerticalAlignment="Center" Text="管理员权限" /><Button Width="142" HorizontalAlignment="Right" Command="{Binding RestartElevatedCommand}" Style="{StaticResource SecondaryButton}" Content="以管理员身份重启" /></Grid>
                                 </StackPanel>
                             </Border>
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="更新" />
+                            <Border Margin="0,12,0,24" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
+                                    <Grid Height="58" Margin="16,0"><TextBlock VerticalAlignment="Center" Text="自动检查新版本" /><ToggleButton HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding CheckForUpdatesEnabled}" Style="{StaticResource SwitchToggle}" ToolTip="每天检查一次 GitHub Release" /></Grid>
+                                    <Separator Margin="16,0" Background="{StaticResource BorderBrush}" />
+                                    <Grid MinHeight="66" Margin="16,0">
+                                        <StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding CurrentVersionText}" /><TextBlock Margin="0,4,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}" Text="{Binding UpdateStatusText}" /></StackPanel>
+                                        <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal">
+                                            <Button Width="92" Margin="0,0,8,0" Command="{Binding CheckForUpdatesCommand}" Style="{StaticResource SecondaryButton}" Content="检查更新" />
+                                            <Button Width="102" Command="{Binding OpenUpdateCommand}" Style="{StaticResource PrimaryButton}" Content="查看新版本" Visibility="{Binding HasAvailableUpdate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
                             <TextBlock FontSize="15" FontWeight="SemiBold" Text="数据" />
                             <Border Margin="0,12,0,24" Padding="16" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
                                 <Grid><TextBlock VerticalAlignment="Center" Text="规则、备份与操作记录" /><Button Width="112" HorizontalAlignment="Right" Command="{Binding OpenDataDirectoryCommand}" Style="{StaticResource SecondaryButton}"><StackPanel Orientation="Horizontal"><TextBlock Margin="0,0,7,0" FontFamily="Segoe MDL2 Assets" Text="&#xE838;" /><TextBlock Text="打开目录" /></StackPanel></Button></Grid>
                             </Border>
                             <TextBlock FontSize="15" FontWeight="SemiBold" Text="关于" />
                             <Border Margin="0,12,0,0" Padding="16" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
-                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,18,0"><TextBlock FontSize="16" FontWeight="SemiBold" Text="DeskHush 0.1.0" /><TextBlock Margin="0,5,0,0" Foreground="{StaticResource MutedTextBrush}" Text="MIT License · Clean-room implementation" /></StackPanel><TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" Text="Windows 10 / 11 · x64" /></Grid>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,18,0"><TextBlock FontSize="16" FontWeight="SemiBold" Text="DeskHush 0.2.0" /><TextBlock Margin="0,5,0,0" Foreground="{StaticResource MutedTextBrush}" Text="MIT License" /></StackPanel><TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" Text="Windows 10 / 11 · x64" /></Grid>
                             </Border>
                         </StackPanel>
                     </ScrollViewer>

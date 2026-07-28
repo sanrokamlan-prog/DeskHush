@@ -6,6 +6,7 @@ using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using DeskHush.App.Infrastructure;
 using DeskHush.App.ViewModels;
 
 namespace DeskHush.App;
@@ -16,15 +17,22 @@ public partial class MainWindow : Window
     private static readonly string[] PageSummaryBindings = ["ProtectionStatus", "RuleCountText", "ContextCountText", "StartupCountText", "AdministratorStatus"];
 
     private readonly MainViewModel viewModel;
+    private readonly DesktopWindowPicker desktopWindowPicker;
     private readonly bool startHidden;
     private readonly string? screenshotPath;
     private readonly int initialPage;
     private bool allowClose;
     private bool showRequested;
 
-    public MainWindow(MainViewModel viewModel, bool startHidden, string? screenshotPath = null, int initialPage = 0)
+    public MainWindow(
+        MainViewModel viewModel,
+        DesktopWindowPicker desktopWindowPicker,
+        bool startHidden,
+        string? screenshotPath = null,
+        int initialPage = 0)
     {
         this.viewModel = viewModel;
+        this.desktopWindowPicker = desktopWindowPicker;
         this.startHidden = startHidden;
         this.screenshotPath = screenshotPath;
         this.initialPage = Math.Clamp(initialPage, 0, PageTitles.Length - 1);
@@ -103,6 +111,40 @@ public partial class MainWindow : Window
         }
 
         SelectPage(index);
+    }
+
+    private async void CaptureWindow_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        var captureButton = sender as System.Windows.Controls.Button;
+        if (captureButton is not null)
+        {
+            captureButton.IsEnabled = false;
+        }
+
+        try
+        {
+            var selectedWindow = await desktopWindowPicker.PickWindowAsync(this);
+            if (selectedWindow is not null)
+            {
+                await viewModel.CreateRuleFromWindowAsync(selectedWindow);
+            }
+        }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                $"桌面抓取失败：{exception.Message}",
+                "DeskHush",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (captureButton is not null)
+            {
+                captureButton.IsEnabled = true;
+            }
+        }
     }
 
     private void SelectPage(int index)

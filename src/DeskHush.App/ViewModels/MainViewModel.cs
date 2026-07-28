@@ -17,33 +17,48 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly ISettingsStore settingsStore;
     private readonly IWindowCatalog windowCatalog;
     private readonly IPopupBlocker popupBlocker;
+    private readonly IWindowRecorder windowRecorder;
+    private readonly IUpdateChecker updateChecker;
+    private readonly Version currentVersion;
     private readonly IContextMenuManager contextMenuManager;
     private readonly IStartupManager startupManager;
     private readonly StartupRegistrationService startupRegistration;
     private readonly string executablePath;
     private readonly string dataDirectory;
     private readonly object settingsSaveLock = new();
+    private readonly CancellationTokenSource lifetimeCancellation = new();
 
     private AppSettings settings = new();
     private Task pendingSettingsSave = Task.CompletedTask;
+    private long windowRecordDisplayGeneration;
     private WindowInfo? selectedWindow;
+    private WindowRecord? selectedWindowRecord;
     private PopupRule? selectedPopupRuleSource;
     private PopupRule? selectedPopupRule;
     private string windowSearchText = string.Empty;
+    private string windowRecordSearchText = string.Empty;
     private string contextSearchText = string.Empty;
     private string startupSearchText = string.Empty;
     private string statusMessage = "正在初始化...";
     private bool isPopupBlockingEnabled;
+    private bool isWindowRecordingEnabled = true;
+    private bool checkForUpdatesEnabled = true;
     private bool startWithWindows;
     private bool minimizeToTray = true;
     private bool isBusy;
     private bool initialized;
     private bool disposed;
+    private DateTimeOffset? lastUpdateCheckAt;
+    private UpdateInfo? availableUpdate;
+    private string? windowRecorderError;
 
     public MainViewModel(
         ISettingsStore settingsStore,
         IWindowCatalog windowCatalog,
         IPopupBlocker popupBlocker,
+        IWindowRecorder windowRecorder,
+        IUpdateChecker updateChecker,
+        Version currentVersion,
         IContextMenuManager contextMenuManager,
         IStartupManager startupManager,
         StartupRegistrationService startupRegistration,
@@ -54,6 +69,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         this.settingsStore = settingsStore;
         this.windowCatalog = windowCatalog;
         this.popupBlocker = popupBlocker;
+        this.windowRecorder = windowRecorder;
+        this.updateChecker = updateChecker;
+        this.currentVersion = currentVersion;
         this.contextMenuManager = contextMenuManager;
         this.startupManager = startupManager;
         this.startupRegistration = startupRegistration;
@@ -62,6 +80,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         RefreshWindowsCommand = new RelayCommand(RefreshWindows);
         AddRuleFromWindowCommand = new AsyncRelayCommand(AddRuleFromWindowAsync, () => SelectedWindow is not null, HandleCommandError);
+        AddRuleFromRecordCommand = new AsyncRelayCommand(AddRuleFromRecordAsync, () => SelectedWindowRecord is not null, HandleCommandError);
+        ClearWindowRecordsCommand = new RelayCommand(ClearWindowRecords, () => WindowRecords.Count > 0);
+        CheckForUpdatesCommand = new AsyncRelayCommand(() => CheckForUpdatesAsync(manual: true), onError: HandleCommandError);
+        OpenUpdateCommand = new RelayCommand(OpenAvailableUpdate, () => AvailableUpdate is not null);
         SaveRuleCommand = new AsyncRelayCommand(
             SaveSelectedRuleAsync,
             () => SelectedPopupRuleSource is not null && SelectedPopupRule is not null,
@@ -79,11 +101,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RestartElevatedCommand = new RelayCommand(restartElevated, () => !IsAdministrator);
 
         popupBlocker.PopupBlocked += OnPopupBlocked;
+        windowRecorder.WindowRecorded += OnWindowRecorded;
     }
 
     public ObservableCollection<WindowInfo> VisibleWindows { get; } = [];
 
     public ObservableCollection<PopupRule> PopupRules { get; } = [];
+
+    public ObservableCollection<WindowRecord> WindowRecords { get; } = [];
 
     public ObservableCollection<ContextMenuEntry> ContextMenuEntries { get; } = [];
 
@@ -91,9 +116,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<ActivityItem> RecentActivity { get; } = [];
 
+    public event EventHandler<UpdateInfo>? UpdateAvailable;
+
     public RelayCommand RefreshWindowsCommand { get; }
 
     public AsyncRelayCommand AddRuleFromWindowCommand { get; }
+
+    public AsyncRelayCommand AddRuleFromRecordCommand { get; }
+
+    public RelayCommand ClearWindowRecordsCommand { get; }
+
+    public AsyncRelayCommand CheckForUpdatesCommand { get; }
+
+    public RelayCommand OpenUpdateCommand { get; }
 
     public AsyncRelayCommand SaveRuleCommand { get; }
 
@@ -143,6 +178,59 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
             ApplyPopupEngineState();
             QueueSettingsSave();
+        }
+    }
+
+    public bool IsWindowRecordingEnabled
+    {
+        get => isWindowRecordingEnabled;
+        set
+        {
+            if (!SetProperty(ref isWindowRecordingEnabled, value))
+            {
+                return;
+            }
+
+            settings.WindowRecordingEnabled = value;
+            OnPropertyChanged(nameof(WindowRecordingStatus));
+            if (!initialized)
+            {
+                return;
+            }
+
+            if (!ApplyWindowRecorderState())
+            {
+                return;
+            }
+
+            QueueSettingsSave();
+            StatusMessage = value ? "窗口记录已开启。" : "窗口记录已暂停。";
+        }
+    }
+
+    public bool CheckForUpdatesEnabled
+    {
+        get => checkForUpdatesEnabled;
+        set
+        {
+            if (!SetProperty(ref checkForUpdatesEnabled, value))
+            {
+                return;
+            }
+
+            settings.CheckForUpdatesEnabled = value;
+            OnPropertyChanged(nameof(UpdateStatusText));
+            if (!initialized)
+            {
+                return;
+            }
+
+            QueueSettingsSave();
+            StatusMessage = value ? "已开启新版本检查。" : "已关闭自动新版本检查。";
+            if (value)
+            {
+                _ = CheckForUpdatesAsync(manual: false);
+            }
         }
     }
 
@@ -206,6 +294,30 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public string ProtectionStatus => IsPopupBlockingEnabled ? "拦截运行中" : "拦截已暂停";
 
+    public string WindowRecordingStatus => windowRecorder.IsRunning ? "记录中" : "已暂停";
+
+    public UpdateInfo? AvailableUpdate
+    {
+        get => availableUpdate;
+        private set
+        {
+            if (SetProperty(ref availableUpdate, value))
+            {
+                OnPropertyChanged(nameof(HasAvailableUpdate));
+                OnPropertyChanged(nameof(UpdateStatusText));
+                OpenUpdateCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool HasAvailableUpdate => AvailableUpdate is not null;
+
+    public string CurrentVersionText => $"当前版本 v{currentVersion.Major}.{currentVersion.Minor}.{Math.Max(0, currentVersion.Build)}";
+
+    public string UpdateStatusText => AvailableUpdate is not null
+        ? $"发现新版本 {AvailableUpdate.TagName}"
+        : CheckForUpdatesEnabled ? "每天自动检查一次" : "自动检查已关闭";
+
     public string RuleCountText => $"{PopupRules.Count} 条规则";
 
     public string ContextCountText => $"{ContextMenuEntries.Count} 个菜单项";
@@ -234,6 +346,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref selectedWindow, value))
             {
                 AddRuleFromWindowCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public WindowRecord? SelectedWindowRecord
+    {
+        get => selectedWindowRecord;
+        set
+        {
+            if (SetProperty(ref selectedWindowRecord, value))
+            {
+                AddRuleFromRecordCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -279,6 +403,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    public string WindowRecordSearchText
+    {
+        get => windowRecordSearchText;
+        set
+        {
+            if (SetProperty(ref windowRecordSearchText, value))
+            {
+                CollectionViewSource.GetDefaultView(WindowRecords).Refresh();
+            }
+        }
+    }
+
     public string ContextSearchText
     {
         get => contextSearchText;
@@ -312,18 +448,27 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
 
         isPopupBlockingEnabled = settings.PopupBlockingEnabled;
+        isWindowRecordingEnabled = settings.WindowRecordingEnabled;
+        checkForUpdatesEnabled = settings.CheckForUpdatesEnabled;
+        lastUpdateCheckAt = settings.LastUpdateCheckAt;
         startWithWindows = startupRegistration.IsEnabled(executablePath);
         settings.StartWithWindows = startWithWindows;
         minimizeToTray = settings.MinimizeToTray;
         OnPropertyChanged(nameof(IsPopupBlockingEnabled));
+        OnPropertyChanged(nameof(IsWindowRecordingEnabled));
+        OnPropertyChanged(nameof(CheckForUpdatesEnabled));
         OnPropertyChanged(nameof(StartWithWindows));
         OnPropertyChanged(nameof(MinimizeToTray));
         OnPropertyChanged(nameof(ProtectionStatus));
+        OnPropertyChanged(nameof(WindowRecordingStatus));
+        OnPropertyChanged(nameof(CurrentVersionText));
+        OnPropertyChanged(nameof(UpdateStatusText));
         RaiseSummaryProperties();
 
         initialized = true;
-        ApplyPopupEngineState();
         ConfigureCollectionFilters();
+        ApplyPopupEngineState();
+        ApplyWindowRecorderState();
         RefreshWindows();
 
         IsBusy = true;
@@ -344,6 +489,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             IsBusy = false;
         }
+
+        if (windowRecorderError is not null)
+        {
+            StatusMessage = $"窗口记录未启动：{windowRecorderError}；其他模块已继续加载。";
+        }
+
+        if (CheckForUpdatesEnabled)
+        {
+            _ = CheckForUpdatesAsync(manual: false);
+        }
     }
 
     public void Dispose()
@@ -353,8 +508,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        disposed = true;
+        Interlocked.Increment(ref windowRecordDisplayGeneration);
+        lifetimeCancellation.Cancel();
+
         popupBlocker.PopupBlocked -= OnPopupBlocked;
         popupBlocker.Dispose();
+        windowRecorder.WindowRecorded -= OnWindowRecorded;
+        windowRecorder.Dispose();
 
         Task pendingSave;
         lock (settingsSaveLock)
@@ -375,13 +536,21 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 MessageBoxImage.Warning);
         }
 
-        disposed = true;
     }
 
     private void ConfigureCollectionFilters()
     {
         CollectionViewSource.GetDefaultView(VisibleWindows).Filter = item =>
             item is WindowInfo window && MatchesSearch(WindowSearchText, window.ProcessName, window.Title, window.ClassName);
+
+        CollectionViewSource.GetDefaultView(WindowRecords).Filter = item =>
+            item is WindowRecord record && MatchesSearch(
+                WindowRecordSearchText,
+                record.ProcessName,
+                record.Title,
+                record.ClassName,
+                record.SizeText,
+                record.PositionText);
 
         CollectionViewSource.GetDefaultView(ContextMenuEntries).Filter = item =>
             item is ContextMenuEntry entry && MatchesSearch(ContextSearchText, entry.Name, entry.Command, entry.Publisher);
@@ -405,19 +574,38 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var title = SelectedWindow.Title;
+        await CreateRuleFromWindowAsync(SelectedWindow);
+    }
+
+    private async Task AddRuleFromRecordAsync()
+    {
+        if (SelectedWindowRecord is null)
+        {
+            return;
+        }
+
+        await CreateRuleFromWindowAsync(SelectedWindowRecord.Window);
+    }
+
+    public async Task CreateRuleFromWindowAsync(WindowInfo window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        var title = window.Title;
+        var hasSpecificTitle = !string.IsNullOrWhiteSpace(title);
         var shortTitle = title.Length > 28 ? $"{title[..28]}..." : title;
         var rule = new PopupRule
         {
             Name = string.IsNullOrWhiteSpace(shortTitle)
-                ? $"{SelectedWindow.ProcessName} 窗口"
-                : $"{SelectedWindow.ProcessName} - {shortTitle}",
-            ProcessName = SelectedWindow.ProcessName,
-            ProcessPath = SelectedWindow.ProcessPath,
-            WindowClass = SelectedWindow.ClassName,
+                ? $"{window.ProcessName} 窗口"
+                : $"{window.ProcessName} - {shortTitle}",
+            ProcessName = window.ProcessName,
+            ProcessPath = window.ProcessPath,
+            WindowClass = window.ClassName,
             TitlePattern = title,
             TitleMatchMode = TextMatchMode.Exact,
-            Action = PopupAction.Close
+            Action = PopupAction.Hide,
+            IsEnabled = hasSpecificTitle
         };
 
         var validation = PopupRuleValidator.Validate(rule);
@@ -432,7 +620,71 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         popupBlocker.UpdateRules(PopupRules);
         await SaveSettingsAsync();
         RaiseSummaryProperties();
-        StatusMessage = "已创建规则。可在下方调整匹配方式和动作。";
+        StatusMessage = hasSpecificTitle
+            ? "已创建规则，默认使用隐藏动作。"
+            : "窗口标题尚未生成，已创建暂停规则；补充标题后再启用。";
+    }
+
+    private void ClearWindowRecords()
+    {
+        Interlocked.Increment(ref windowRecordDisplayGeneration);
+        windowRecorder.Clear();
+        WindowRecords.Clear();
+        SelectedWindowRecord = null;
+        ClearWindowRecordsCommand.RaiseCanExecuteChanged();
+        StatusMessage = "窗口记录已清空。";
+    }
+
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!manual && lastUpdateCheckAt is not null && now - lastUpdateCheckAt < TimeSpan.FromDays(1))
+        {
+            return;
+        }
+
+        lastUpdateCheckAt = now;
+        settings.LastUpdateCheckAt = now;
+        QueueSettingsSave();
+
+        try
+        {
+            var update = await updateChecker.CheckAsync(currentVersion, lifetimeCancellation.Token);
+            AvailableUpdate = update;
+            if (update is not null)
+            {
+                StatusMessage = $"发现新版本 {update.TagName}。";
+                UpdateAvailable?.Invoke(this, update);
+            }
+            else if (manual)
+            {
+                StatusMessage = "当前已是最新版本。";
+            }
+        }
+        catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (manual)
+            {
+                StatusMessage = $"检查更新失败：{exception.Message}";
+            }
+        }
+    }
+
+    private void OpenAvailableUpdate()
+    {
+        if (AvailableUpdate is null)
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = AvailableUpdate.ReleaseUri.AbsoluteUri,
+            UseShellExecute = true
+        });
     }
 
     private async Task SaveSelectedRuleAsync()
@@ -568,6 +820,40 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private bool ApplyWindowRecorderState()
+    {
+        try
+        {
+            if (IsWindowRecordingEnabled)
+            {
+                windowRecorder.Start();
+            }
+            else
+            {
+                windowRecorder.Stop();
+            }
+
+            windowRecorderError = null;
+            OnPropertyChanged(nameof(WindowRecordingStatus));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            isWindowRecordingEnabled = false;
+            settings.WindowRecordingEnabled = false;
+            windowRecorderError = exception.Message;
+            OnPropertyChanged(nameof(IsWindowRecordingEnabled));
+            OnPropertyChanged(nameof(WindowRecordingStatus));
+            if (initialized)
+            {
+                QueueSettingsSave();
+            }
+
+            StatusMessage = $"窗口记录启动失败：{exception.Message}";
+            return false;
+        }
+    }
+
     private void OnPopupBlocked(object? sender, PopupBlockedEvent popupEvent)
     {
         _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
@@ -585,6 +871,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             RaiseSummaryProperties();
             StatusMessage = $"已处理窗口：{popupEvent.Window.Title}";
             QueueSettingsSave();
+        });
+    }
+
+    private void OnWindowRecorded(object? sender, WindowRecord record)
+    {
+        var displayGeneration = Volatile.Read(ref windowRecordDisplayGeneration);
+        _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            if (displayGeneration != Volatile.Read(ref windowRecordDisplayGeneration))
+            {
+                return;
+            }
+
+            WindowRecords.Insert(0, record);
+            while (WindowRecords.Count > WindowRecordBuffer.DefaultCapacity)
+            {
+                WindowRecords.RemoveAt(WindowRecords.Count - 1);
+            }
+
+            ClearWindowRecordsCommand.RaiseCanExecuteChanged();
         });
     }
 
@@ -637,6 +943,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return new AppSettings
         {
             PopupBlockingEnabled = isPopupBlockingEnabled,
+            WindowRecordingEnabled = isWindowRecordingEnabled,
+            CheckForUpdatesEnabled = checkForUpdatesEnabled,
+            LastUpdateCheckAt = lastUpdateCheckAt,
             StartWithWindows = startWithWindows,
             MinimizeToTray = minimizeToTray,
             Language = settings.Language,

@@ -3,6 +3,7 @@ using System.Drawing;
 using System.IO;
 using System.Threading;
 using System.Windows;
+using DeskHush.App.Infrastructure;
 using DeskHush.App.ViewModels;
 using DeskHush.Core.Services;
 using DeskHush.Windows.ContextMenu;
@@ -23,8 +24,12 @@ public partial class App : System.Windows.Application
     private EventWaitHandle? showEvent;
     private RegisteredWaitHandle? showEventRegistration;
     private WinForms.NotifyIcon? notifyIcon;
+    private Icon? trayIcon;
     private MainWindow? mainWindow;
     private MainViewModel? viewModel;
+    private Uri? availableUpdateUri;
+    private string activeMutexName = MutexName;
+    private string activeShowEventName = ShowEventName;
     private bool exiting;
 
     protected override void OnStartup(StartupEventArgs eventArgs)
@@ -32,18 +37,25 @@ public partial class App : System.Windows.Application
         base.OnStartup(eventArgs);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+        if (eventArgs.Args.Any(argument => argument.StartsWith("--qa-", StringComparison.OrdinalIgnoreCase)))
+        {
+            var qaSuffix = $".QA.{Environment.ProcessId}";
+            activeMutexName += qaSuffix;
+            activeShowEventName += qaSuffix;
+        }
+
         if (!WaitForPreviousProcess(eventArgs.Args))
         {
             Shutdown();
             return;
         }
 
-        instanceMutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
+        instanceMutex = new Mutex(initiallyOwned: true, activeMutexName, out var createdNew);
         if (!createdNew)
         {
             try
             {
-                using var existingEvent = EventWaitHandle.OpenExisting(ShowEventName);
+                using var existingEvent = EventWaitHandle.OpenExisting(activeShowEventName);
                 existingEvent.Set();
             }
             catch (WaitHandleCannotBeOpenedException)
@@ -64,21 +76,29 @@ public partial class App : System.Windows.Application
 
         var windowCatalog = new WindowCatalog();
         var popupBlocker = new WinEventPopupBlocker(windowCatalog);
+        var windowRecorder = new WinEventWindowRecorder(windowCatalog);
+        var desktopWindowPicker = new DesktopWindowPicker(windowCatalog);
         var contextMenuManager = new WindowsContextMenuManager(dataDirectory);
         var startupManager = new WindowsStartupManager(dataDirectory);
         var settingsStore = new JsonSettingsStore(Path.Combine(dataDirectory, "settings.json"));
+        var updateChecker = new GitHubReleaseUpdateChecker();
         var startupRegistration = new StartupRegistrationService();
+        var currentVersion = typeof(App).Assembly.GetName().Version ?? new Version(0, 2, 0);
 
         viewModel = new MainViewModel(
             settingsStore,
             windowCatalog,
             popupBlocker,
+            windowRecorder,
+            updateChecker,
+            currentVersion,
             contextMenuManager,
             startupManager,
             startupRegistration,
             executablePath,
             dataDirectory,
             () => RestartElevated(executablePath));
+        viewModel.UpdateAvailable += OnUpdateAvailable;
 
         var startHidden = eventArgs.Args.Any(argument => argument.Equals("--background", StringComparison.OrdinalIgnoreCase));
         var screenshotPath = eventArgs.Args
@@ -89,7 +109,12 @@ public partial class App : System.Windows.Application
         var qaTab = tabArgument is not null && int.TryParse(tabArgument["--qa-tab=".Length..], out var parsedTab)
             ? parsedTab
             : 0;
-        mainWindow = new MainWindow(viewModel, startHidden: startHidden && screenshotPath is null, screenshotPath, qaTab);
+        mainWindow = new MainWindow(
+            viewModel,
+            desktopWindowPicker,
+            startHidden: startHidden && screenshotPath is null,
+            screenshotPath,
+            qaTab);
         if (eventArgs.Args.Any(argument => argument.Equals("--qa-compact", StringComparison.OrdinalIgnoreCase)))
         {
             mainWindow.Width = mainWindow.MinWidth;
@@ -107,6 +132,11 @@ public partial class App : System.Windows.Application
         showEventRegistration?.Unregister(null);
         showEvent?.Dispose();
         notifyIcon?.Dispose();
+        trayIcon?.Dispose();
+        if (viewModel is not null)
+        {
+            viewModel.UpdateAvailable -= OnUpdateAvailable;
+        }
         viewModel?.Dispose();
 
         if (instanceMutex is not null)
@@ -127,7 +157,7 @@ public partial class App : System.Windows.Application
 
     private void RegisterShowEvent()
     {
-        showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
+        showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, activeShowEventName);
         showEventRegistration = ThreadPool.RegisterWaitForSingleObject(
             showEvent,
             (_, _) => Dispatcher.BeginInvoke(ShowMainWindow),
@@ -138,9 +168,15 @@ public partial class App : System.Windows.Application
 
     private void CreateTrayIcon()
     {
+        var processPath = Environment.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(processPath))
+        {
+            trayIcon = Icon.ExtractAssociatedIcon(processPath);
+        }
+
         notifyIcon = new WinForms.NotifyIcon
         {
-            Icon = SystemIcons.Shield,
+            Icon = trayIcon ?? SystemIcons.Application,
             Text = "DeskHush",
             Visible = true
         };
@@ -158,6 +194,31 @@ public partial class App : System.Windows.Application
         menu.Items.Add("退出", null, (_, _) => Dispatcher.BeginInvoke(ExitApplication));
         notifyIcon.ContextMenuStrip = menu;
         notifyIcon.DoubleClick += (_, _) => Dispatcher.BeginInvoke(ShowMainWindow);
+        notifyIcon.BalloonTipClicked += (_, _) => Dispatcher.BeginInvoke(OpenAvailableUpdate);
+    }
+
+    private void OnUpdateAvailable(object? sender, DeskHush.Core.Models.UpdateInfo update)
+    {
+        availableUpdateUri = update.ReleaseUri;
+        notifyIcon?.ShowBalloonTip(
+            5000,
+            "DeskHush 有新版本",
+            $"{update.TagName} 已发布，点击查看。",
+            WinForms.ToolTipIcon.Info);
+    }
+
+    private void OpenAvailableUpdate()
+    {
+        if (availableUpdateUri is null)
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = availableUpdateUri.AbsoluteUri,
+            UseShellExecute = true
+        });
     }
 
     private void ShowMainWindow() => mainWindow?.ShowAndActivate();

@@ -56,6 +56,16 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: ./scripts/build-release.ps1 -Version $env:RELEASE_VERSION
 
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: DeskHush-v${{ steps.version.outputs.version }}-win-x64
+          path: |
+            artifacts/release/DeskHush-v${{ steps.version.outputs.version }}-win-x64.zip
+            artifacts/release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Create GitHub release
         shell: pwsh
         env:
@@ -69,11 +79,21 @@ jobs:
             gh release upload $env:GITHUB_REF_NAME $archive $checksums --clobber --repo $env:GITHUB_REPOSITORY
           }
           else {
-            gh release create $env:GITHUB_REF_NAME $archive $checksums `
-              --repo $env:GITHUB_REPOSITORY `
-              --title "DeskHush $env:GITHUB_REF_NAME" `
-              --generate-notes `
-              --verify-tag
+            $notes = "docs/release-notes/v$env:RELEASE_VERSION.md"
+            if (Test-Path -LiteralPath $notes -PathType Leaf) {
+              gh release create $env:GITHUB_REF_NAME $archive $checksums `
+                --repo $env:GITHUB_REPOSITORY `
+                --title "DeskHush $env:GITHUB_REF_NAME" `
+                --notes-file $notes `
+                --verify-tag
+            }
+            else {
+              gh release create $env:GITHUB_REF_NAME $archive $checksums `
+                --repo $env:GITHUB_REPOSITORY `
+                --title "DeskHush $env:GITHUB_REF_NAME" `
+                --generate-notes `
+                --verify-tag
+            }
           }
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub release command failed with exit code $LASTEXITCODE."

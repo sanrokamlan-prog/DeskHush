@@ -5,14 +5,20 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>DeskHush</AssemblyName>
     <RootNamespace>DeskHush.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\DeskHush.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DeskHush.Core\DeskHush.Core.csproj" />
     <ProjectReference Include="..\DeskHush.Windows\DeskHush.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\DeskHush.ico" />
   </ItemGroup>
 
 </Project>

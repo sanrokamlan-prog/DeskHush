@@ -4,19 +4,19 @@
 
 DeskHush combines three narrowly scoped Windows-management capabilities behind one desktop lifecycle:
 
-1. observe newly shown top-level windows and apply explicit user rules;
+1. identify top-level windows through a desktop picker, current-window enumeration, or bounded background recording, then apply explicit user rules;
 2. enumerate and reversibly toggle common Explorer context-menu registrations;
 3. enumerate and reversibly toggle `Run`, `RunOnce`, and Startup-folder entries.
 
-The current design intentionally excludes drivers, process injection, Explorer restarts, scheduled-task management, service management, cloud rule delivery, and automatic updates.
+The current design intentionally excludes drivers, process injection, Explorer restarts, scheduled-task management, service management, cloud rule delivery, and automatic update download or installation.
 
 ## Project structure
 
 | Project | Responsibility | May depend on |
 | --- | --- | --- |
-| `DeskHush.Core` | Models, interfaces, popup-rule matching/validation, stable IDs, JSON settings | .NET base libraries |
-| `DeskHush.Windows` | Win32 interop, window catalog, WinEvent popup engine, registry and Startup-folder adapters | `DeskHush.Core` |
-| `DeskHush.App` | WPF UI, ViewModel orchestration, tray, single instance, elevation restart, app startup registration | `DeskHush.Core`, `DeskHush.Windows` |
+| `DeskHush.Core` | Models, interfaces, popup-rule matching/validation, bounded window-record buffer, release-version check, stable IDs, JSON settings | .NET base libraries |
+| `DeskHush.Windows` | Win32 interop, window catalog, WinEvent popup engine and recorder, registry and Startup-folder adapters | `DeskHush.Core` |
+| `DeskHush.App` | WPF UI, in-memory virtual-desktop picker, ViewModel orchestration, tray/update notice, single instance, elevation restart, app startup registration | `DeskHush.Core`, `DeskHush.Windows` |
 | `DeskHush.Tests` | Pure-logic tests and read-only Windows enumeration smoke tests | `DeskHush.Core`, `DeskHush.Windows` |
 
 ```mermaid
@@ -29,15 +29,17 @@ flowchart LR
     Windows --> State
 ```
 
-The ViewModel consumes Core interfaces rather than registry or Win32 primitives. The Windows project owns platform-specific handles, registry views, elevation checks, and file moves.
+The ViewModel consumes Core interfaces rather than registry or Win32 primitives. The Windows project owns platform-specific handles, event hooks, registry views, elevation checks, and file moves. The App project owns the visual desktop-capture surface because it is coupled to the WPF lifecycle rather than rule matching.
 
 ## Application lifecycle
 
-DeskHush uses a named mutex to enforce a single instance. A second launch signals the existing process through a named event and then exits. The first instance owns the WPF window, popup engine, state stores, and notification-area icon.
+DeskHush uses a named mutex to enforce a single instance. A second launch signals the existing process through a named event and then exits. The first instance owns the WPF window, popup engine, optional window recorder, state stores, and notification-area icon.
 
 Normal startup shows the window. `--background` initializes the same services without activating or showing the taskbar window, then remains available from the tray. Closing or minimizing hides the window when the corresponding setting is enabled; only the tray **Exit** action tears down the hook and process.
 
 The “Start with Windows” setting writes one current-user `Run` value named `DeskHush` whose command is the current executable path plus `--background`. It is separate from the startup-entry manager.
+
+When enabled, release checking runs after the main initialization path and at most once per 24 hours. It is a degradable task: network, parsing, or rate-limit failures do not interrupt popup hooks, window recording, enumeration, or hidden startup. A successful newer-version result is surfaced through the ViewModel and notification-area icon; installation remains a browser-mediated user action.
 
 ## Popup event flow
 
@@ -64,6 +66,26 @@ sequenceDiagram
 A valid rule must identify a process and at least one window characteristic. Title regexes use a short timeout. Validation and runtime checks protect critical system process names, while DeskHush itself and Explorer are also rejected by the engine.
 
 The action is cooperative rather than forceful: `WM_CLOSE` can be ignored, and hiding a window does not stop its process.
+
+## Window discovery flows
+
+### Desktop picker
+
+The picker temporarily hides the main window, captures the complete Windows virtual desktop into a WPF bitmap, and takes a matching snapshot of visible top-level `WindowInfo` records. Candidate rectangles are translated from desktop coordinates into capture coordinates and clipped to the virtual-desktop bounds. The user selects a highlighted rectangle to prefill a popup rule.
+
+The capture remains in memory only. It is not encoded or written to disk, and both the bitmap and candidate snapshot become unreachable when the modal picker closes. The picker is a point-in-time view: windows shown after capture belong in the recorder workflow.
+
+### Background recorder
+
+`WinEventWindowRecorder` independently observes newly shown top-level windows with an out-of-context WinEvent hook. The callback writes handles into a bounded channel consumed by a fixed worker count, avoiding an unbounded ThreadPool task per event. Metadata is sampled at absolute offsets and merged until a non-empty title stabilizes or retries finish. Repeated show events for the same handle are deduplicated over a short interval.
+
+The newest records appear first. The buffer is capped at 500 entries and evicts the oldest record at capacity. It stores process identity, title, window class, position, size, and observation time in process memory only. Clear advances an epoch so already queued work cannot repopulate old records; process exit discards the buffer. Records are not added to `settings.json` or uploaded.
+
+### Release check
+
+`GitHubReleaseUpdateChecker` sends an unauthenticated HTTPS GET for the latest public release metadata with an application `User-Agent` and pinned API-version header. It accepts only numeric `vMAJOR.MINOR.PATCH`-style tags and HTTPS release links hosted on `github.com`, then compares the result with the running assembly version. The client never downloads an asset.
+
+The user can disable scheduled checks or run one manually. `LastUpdateCheckAt` is persisted to enforce the daily interval. A failed request is silent during automatic checks and becomes a status message only for an explicit manual check.
 
 ## Context-menu flow
 
@@ -114,10 +136,12 @@ Default state root: `%LOCALAPPDATA%\DeskHush`.
 
 | Path | Owner | Contents |
 | --- | --- | --- |
-| `settings.json` | Core/App | Popup engine setting, tray/startup preferences, popup rules and hit data |
+| `settings.json` | Core/App | Popup/recording settings, tray/startup/update preferences, last release-check time, popup rules and hit data |
 | `context-menu-state.json` | Windows context-menu adapter | Original marker-presence records for DeskHush changes |
 | `startup-state.json` | Windows startup adapter | Registry snapshots, Startup-folder move records, and `StartupApproved` originals |
 | `disabled-startup/` | Windows startup adapter | Disabled Startup-folder files/directories |
+
+Desktop-capture images and `WindowRecord` instances are intentionally absent from this table because they are transient in-memory state.
 
 Settings and recovery state use write-then-move persistence. A malformed settings file is moved aside and defaults are loaded. Invalid startup recovery data is left untouched and reported rather than guessed at.
 
@@ -133,4 +157,4 @@ A new Windows surface is complete only when enumeration, identity, scope, privil
 
 ## Validation strategy
 
-Pure logic is covered for matching modes, composite matching, protected-process validation, stable IDs, settings round trips, and malformed-settings recovery. Windows smoke tests enumerate visible windows, context-menu entries, and startup entries and verify stable unique IDs. Mutating registry and filesystem paths should be validated in a disposable Windows VM because a unit test cannot reproduce Explorer caching, policy restrictions, or third-party installers racing on the same keys.
+Pure logic is covered for matching modes, composite matching, protected-process validation, stable IDs, settings round trips, malformed-settings recovery, release-version parsing/link validation, and window-record queue/retry/capacity/deduplication/lifecycle behavior. Windows smoke tests enumerate visible windows, context-menu entries, and startup entries and verify stable unique IDs. The desktop picker requires visual checks across single-monitor and mixed-origin multi-monitor layouts. Mutating registry and filesystem paths should be validated in a disposable Windows VM because a unit test cannot reproduce Explorer caching, policy restrictions, or third-party installers racing on the same keys.

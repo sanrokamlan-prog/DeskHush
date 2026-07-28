@@ -8,9 +8,9 @@
 [![Release](https://img.shields.io/github/v/release/sanrokamlan-prog/DeskHush?display_name=tag)](https://github.com/sanrokamlan-prog/DeskHush/releases/latest)
 [![License](https://img.shields.io/github/license/sanrokamlan-prog/DeskHush)](LICENSE)
 
-DeskHush is an open-source Windows utility. It installs no driver, injects no code into other processes, and does not restart Explorer automatically. Registry and Startup-folder changes retain recovery state, and restore operations refuse to overwrite conflicts.
+DeskHush is an open-source Windows utility. It can locate difficult popup targets through a desktop picker or background window recording, while also managing Explorer context-menu entries and common logon startup locations. It installs no driver, injects no code into other processes, and does not restart Explorer automatically. Registry and Startup-folder changes retain recovery state, and restore operations refuse to overwrite conflicts.
 
-![DeskHush overview](docs/images/overview.png)
+![DeskHush popup management](docs/images/popup-management.png)
 
 ## Download and run
 
@@ -29,19 +29,24 @@ Closing the window keeps DeskHush in the notification area by default. Double-cl
 
 | Area | Implemented behavior | Mechanism |
 | --- | --- | --- |
-| Popup rules | Match process name/path, window class, and title; contains, exact, wildcard, or regex title matching; close or hide action | Out-of-context `EVENT_OBJECT_SHOW` hook, then `WM_CLOSE` or hide |
+| Popup rules | Current-window list, desktop picker, and background window recording; match process name/path, class, and title; close or hide action | Automatically outline detectable windows in a desktop capture; observe `EVENT_OBJECT_SHOW`, then apply `WM_CLOSE` or hide |
 | Context menus | File, folder, folder background, drive, desktop, and all-filesystem-object locations; static verbs and shell extensions; HKCU/HKLM and 32/64-bit views | `LegacyDisable` for static verbs; per-user `Shell Extensions\Blocked` for handlers |
 | Startup entries | Current-user/all-users `Run` and `RunOnce`, user/common Startup folders, and applicable Task Manager approval state | Preserve registry values and `StartupApproved`; move Startup-folder items into recovery storage |
 | Background mode | Single instance, tray lifecycle, close/minimize to tray | `DeskHush.exe --background` |
 | Start with Windows | Start minimized to the tray after the current user signs in | A DeskHush-owned HKCU `Run` value |
+| Update notice | Quiet daily release check, with disable and manual-check controls | Read public GitHub Release metadata; open the release page only after a click |
 
 The startup manager does **not** currently enumerate or modify scheduled tasks, Windows services, drivers, or other auto-start extension points. A reserved model enum is not an implemented feature.
 
 ## Popup rules
 
+Targets can be selected from the current-window list, by freezing the virtual desktop and clicking an automatically outlined window, or from a background record of newly shown windows. The latter two paths are useful for windows that disappear before a manual list refresh.
+
+The desktop picker hides the DeskHush window and creates one in-memory capture of the complete virtual desktop. The image is never written to disk and is released when the picker closes. Window recording retains process, title, class, position, and size metadata for up to 500 newly shown windows. Records can be cleared explicitly, remain in process memory only, are discarded on exit, and are never uploaded.
+
 A rule must identify a specific process by name or full path and also specify a window title or class. Rules that target protected system processes are rejected. Matching is case-insensitive; window classes use wildcards, while titles support contains, exact, wildcard, and timeout-bounded regular expressions.
 
-The **Close** action posts a normal close message and can be rejected by the target application. **Hide** leaves the process running; the target application may need to show the window again, or be restarted, to recover it. Test a new rule with Hide first when unsaved data may be present.
+The **Close** action posts a normal close message and can be rejected by the target application. **Hide** leaves the process running; the target application may need to show the window again, or be restarted, to recover it. New rules default to Hide. If a recorded window has not produced a title yet, its rule remains disabled until the matching scope is reviewed.
 
 DeskHush stores hit counts and the most recent hit time locally. It does not upload window metadata.
 
@@ -64,14 +69,21 @@ Restore verifies the result and refuses to overwrite a registry value or file th
 
 Machine-wide `Run`/`RunOnce` entries and the common Startup folder require elevation. The startup-manager page controls other applications; the Start with Windows setting only controls DeskHush itself.
 
+## Update notice
+
+DeskHush checks public GitHub Release metadata at most once per day by default. A newer version is shown in Settings and as a notification-area notice; the release page opens only after a click. DeskHush never downloads, installs, or replaces itself. Automatic checks can be disabled while manual checks remain available.
+
+The request carries no GitHub credentials, rules, or window data, but a normal HTTPS request exposes the public IP address and installed DeskHush version to GitHub. A failed check does not affect popup handling, recording, or background startup.
+
 ## Safety model
 
 - Out-of-context WinEvent observation: no process injection and no third-party module loading.
+- In-memory desktop captures and window records: no screenshot files, persistent history, or uploads.
 - Scoped popup rules and a protected-system-process denylist.
 - Recovery state persisted before reversible registry or file changes.
 - Conflict and concurrent-change checks instead of silent overwrite.
 - Current-user execution by default, with elevation requested only for machine scope.
-- Local configuration only; no telemetry, cloud sync, or rule download feature.
+- Local configuration only; no telemetry, cloud sync, or rule download feature. Optional update checks read public Release metadata only.
 
 These controls are not a replacement for a restore point, registry export, or system backup. Read [Safety and recovery](docs/safety-and-recovery.md) before changing critical software entries.
 
@@ -86,6 +98,8 @@ startup-state.json
 disabled-startup\
 ```
 
+Desktop captures and window records are transient and therefore do not appear in this directory.
+
 Do not delete this directory while entries remain disabled. Restore the entries you want to keep, disable DeskHush's own Start with Windows setting, exit from the tray, remove the program directory, and only then remove the data directory after verifying recovery.
 
 ## Build and test
@@ -98,20 +112,15 @@ dotnet build DeskHush.sln -c Release --no-restore
 dotnet run --project tests/DeskHush.Tests/DeskHush.Tests.csproj -c Release
 ```
 
-Publish a self-contained x64 build:
+Official archives are not packaged on a developer workstation. Updating the project version and pushing the matching tag (for example, `v0.2.0`) runs the [Release workflow](.github/workflows/release.yml) on GitHub Actions. It performs strict build and tests, creates the self-contained x64 ZIP plus `SHA256SUMS.txt`, uploads both to the matching Release, and retains the same workflow artifact for 14 days.
+
+To reproduce the same pipeline locally when needed:
 
 ```powershell
-dotnet publish src/DeskHush.App/DeskHush.App.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained true `
-  -p:PublishSingleFile=true `
-  -p:IncludeNativeLibrariesForSelfExtract=true `
-  -p:EnableCompressionInSingleFile=true `
-  -o artifacts/publish
+./scripts/build-release.ps1 -Version 0.2.0
 ```
 
-The console test runner has no third-party test-framework dependency. Its context-menu and startup smoke tests enumerate the local Windows system in read-only mode.
+The console test runner has no third-party test-framework dependency. It covers the bounded recording queue, retry schedule, capacity/deduplication, release-version comparison, rule logic, and persistence. Its Windows enumeration smoke tests are read-only.
 
 ## Architecture and contribution
 

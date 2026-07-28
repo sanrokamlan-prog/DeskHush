@@ -10,7 +10,12 @@ public sealed record WindowInfo(
     int Left,
     int Top,
     int Width,
-    int Height);
+    int Height)
+{
+    public string SizeText => $"{Width} x {Height}";
+
+    public string PositionText => $"{Left}, {Top}";
+}
 
 public sealed record PopupBlockedEvent(
     PopupRule Rule,

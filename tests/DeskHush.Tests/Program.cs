@@ -19,6 +19,17 @@ internal static class Program
         ("JSON settings null collection recovery", TestJsonSettingsNullCollectionRecovery),
         ("JSON settings corruption recovery", TestJsonSettingsCorruptionRecovery),
         ("Visible-window catalog smoke", TestWindowCatalog),
+        ("Window-record deduplication and ordering", WindowRecordingTests.TestDeduplicationAndOrdering),
+        ("Window-record capacity and clear", WindowRecordingTests.TestCapacityAndClear),
+        ("Window-record concurrent deduplication", WindowRecordingTests.TestConcurrentDeduplication),
+        ("Window-record absolute retry schedule", WindowRecordingTests.TestSnapshotScheduleAndStableTitle),
+        ("Window-record best snapshot retention", WindowRecordingTests.TestSnapshotRetainsBestMetadata),
+        ("Window-record clear epoch", WindowRecordingTests.TestClearInvalidatesQueuedWork),
+        ("Window-record bounded consumers", WindowRecordingTests.TestBoundedConsumerConcurrency),
+        ("Window-record lifecycle serialization", WindowRecordingTests.TestLifecycleSerializesStartAndDispose),
+        ("Update release version parsing", UpdateCheckerTests.TestVersionParsing),
+        ("Update newer-release detection", UpdateCheckerTests.TestNewerReleaseDetection),
+        ("Update current/invalid release rejection", UpdateCheckerTests.TestCurrentAndInvalidReleaseRejection),
         ("Context-menu enumeration smoke", TestContextMenuEnumeration),
         ("StartupApproved binary semantics", StartupTests.TestStartupApprovalSemantics),
         ("Self-start approval semantics", StartupTests.TestSelfStartupApprovalSemantics),
@@ -138,9 +149,13 @@ internal static class Program
         {
             var path = Path.Combine(root, "settings.json");
             var store = new JsonSettingsStore(path);
+            var updateCheckAt = new DateTimeOffset(2026, 7, 28, 8, 30, 0, TimeSpan.Zero);
             var settings = new AppSettings
             {
                 PopupBlockingEnabled = false,
+                WindowRecordingEnabled = false,
+                CheckForUpdatesEnabled = false,
+                LastUpdateCheckAt = updateCheckAt,
                 StartWithWindows = true,
                 PopupRules =
                 [
@@ -151,6 +166,9 @@ internal static class Program
             await store.SaveAsync(settings);
             var loaded = await store.LoadAsync();
             Assert(!loaded.PopupBlockingEnabled, "Boolean setting should round-trip.");
+            Assert(!loaded.WindowRecordingEnabled, "Window-recording setting should round-trip.");
+            Assert(!loaded.CheckForUpdatesEnabled && loaded.LastUpdateCheckAt == updateCheckAt,
+                "Update-check settings should round-trip.");
             Assert(loaded.StartWithWindows, "Startup setting should round-trip.");
             Assert(loaded.PopupRules is [{ Name: "Rule", HitCount: 7 }], "Rules should round-trip.");
             Assert(!Directory.EnumerateFiles(root, "*.tmp").Any(), "Atomic-save temporary files should not remain.");
