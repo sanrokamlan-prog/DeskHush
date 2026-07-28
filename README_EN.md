@@ -112,12 +112,12 @@ dotnet build DeskHush.sln -c Release --no-restore
 dotnet run --project tests/DeskHush.Tests/DeskHush.Tests.csproj -c Release
 ```
 
-Official archives are not packaged on a developer workstation. Updating the project version and pushing the matching tag (for example, `v0.2.0`) runs the [Release workflow](.github/workflows/release.yml) on GitHub Actions. It performs strict build and tests, creates the self-contained x64 ZIP plus `SHA256SUMS.txt`, uploads both to the matching Release, and retains the same workflow artifact for 14 days.
+Official archives are not packaged on a developer workstation. Updating the project version and pushing the matching tag (for example, `v0.2.1`) runs the [Release workflow](.github/workflows/release.yml) on GitHub Actions. It performs strict build and tests, creates the self-contained x64 ZIP plus `SHA256SUMS.txt`, uploads both to the matching Release, and retains the same workflow artifact for 14 days.
 
 To reproduce the same pipeline locally when needed:
 
 ```powershell
-./scripts/build-release.ps1 -Version 0.2.0
+./scripts/build-release.ps1 -Version 0.2.1
 ```
 
 The console test runner has no third-party test-framework dependency. It covers the bounded recording queue, retry schedule, capacity/deduplication, release-version comparison, rule logic, and persistence. Its Windows enumeration smoke tests are read-only.

@@ -1,3 +1,4 @@
+using System.IO;
 using DeskHush.Core.Models;
 using DeskHush.Windows.Startup;
 using DeskHush.Windows.SystemIntegration;

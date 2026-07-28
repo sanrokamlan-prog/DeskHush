@@ -117,12 +117,12 @@ dotnet build DeskHush.sln -c Release --no-restore
 dotnet run --project tests/DeskHush.Tests/DeskHush.Tests.csproj -c Release
 ```
 
-正式发行包不在开发者本机制作。版本号更新并推送匹配标签（例如 `v0.2.0`）后，[Release workflow](.github/workflows/release.yml) 会在 GitHub Actions 的 Windows 环境中运行严格编译和测试，生成自包含 x64 单文件 ZIP、`SHA256SUMS.txt`，上传到对应 Release，并将同一份产物在 Actions 中保留 14 天。
+正式发行包不在开发者本机制作。版本号更新并推送匹配标签（例如 `v0.2.1`）后，[Release workflow](.github/workflows/release.yml) 会在 GitHub Actions 的 Windows 环境中运行严格编译和测试，生成自包含 x64 单文件 ZIP、`SHA256SUMS.txt`，上传到对应 Release，并将同一份产物在 Actions 中保留 14 天。
 
 需要在本地复现同一构建流程时，可运行：
 
 ```powershell
-./scripts/build-release.ps1 -Version 0.2.0
+./scripts/build-release.ps1 -Version 0.2.1
 ```
 
 测试项目是无第三方测试框架依赖的控制台测试运行器，包含规则匹配与安全校验、设置持久化、窗口记录队列/重试/容量/去重、版本比较、窗口枚举、右键菜单只读枚举和启动项只读枚举。后三类系统冒烟测试会读取当前 Windows 环境，但不会修改系统状态。

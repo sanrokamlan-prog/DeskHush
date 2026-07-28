@@ -1,3 +1,5 @@
+using System.IO;
+using DeskHush.App.Infrastructure;
 using DeskHush.Core.Models;
 using DeskHush.Core.Services;
 using DeskHush.Windows.ContextMenu;
@@ -38,8 +40,13 @@ internal static class Program
         ("Startup enumeration smoke", TestStartupEnumeration)
     ];
 
-    public static async Task<int> Main()
+    public static async Task<int> Main(string[] args)
     {
+        if (args.Length == 1 && string.Equals(args[0], "--capture-smoke", StringComparison.Ordinal))
+        {
+            return RunDesktopCaptureSmokeTest();
+        }
+
         var failures = new List<string>();
         foreach (var (name, test) in Tests)
         {
@@ -58,6 +65,19 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine($"{Tests.Count - failures.Count}/{Tests.Count} tests passed.");
         return failures.Count == 0 ? 0 : 1;
+    }
+
+    private static int RunDesktopCaptureSmokeTest()
+    {
+        var frame = DesktopCaptureService.CaptureVirtualDesktop();
+        Assert(frame.Bounds.Width > 0 && frame.Bounds.Height > 0, "Desktop bounds must be positive.");
+        Assert(frame.Image.PixelWidth == frame.Bounds.Width, "Captured width must match the virtual desktop.");
+        Assert(frame.Image.PixelHeight == frame.Bounds.Height, "Captured height must match the virtual desktop.");
+        Assert(frame.Image.IsFrozen, "Captured image must be frozen before crossing threads.");
+        Console.WriteLine(
+            $"CAPTURE_OK bounds={frame.Bounds.Left},{frame.Bounds.Top},{frame.Bounds.Width}x{frame.Bounds.Height} " +
+            $"pixels={frame.Image.PixelWidth}x{frame.Image.PixelHeight}");
+        return 0;
     }
 
     private static Task TestPopupMatchingModes()

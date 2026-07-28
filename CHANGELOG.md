@@ -2,6 +2,13 @@
 
 All notable changes to DeskHush are documented in this file.
 
+## [0.2.1] - 2026-07-29
+
+### Fixed
+
+- Fixed desktop capture failing because `Graphics.CopyFromScreen` rejected the combined layered-window raster operation.
+- Switched desktop pixel transfer to native `BitBlt` while retaining layered-window capture and deterministic GDI resource cleanup.
+
 ## [0.2.0] - 2026-07-29
 
 ### Added
@@ -38,5 +45,6 @@ All notable changes to DeskHush are documented in this file.
 - Unified system-process protection for popup rules and serialized context-menu operations.
 - Self-contained Windows x64 release packaging with SHA-256 checksums.
 
+[0.2.1]: https://github.com/sanrokamlan-prog/DeskHush/releases/tag/v0.2.1
 [0.2.0]: https://github.com/sanrokamlan-prog/DeskHush/releases/tag/v0.2.0
 [0.1.0]: https://github.com/sanrokamlan-prog/DeskHush/releases/tag/v0.1.0

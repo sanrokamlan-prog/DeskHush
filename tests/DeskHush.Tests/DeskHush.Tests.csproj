@@ -3,10 +3,12 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <RootNamespace>DeskHush.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\DeskHush.App\DeskHush.App.csproj" />
     <ProjectReference Include="..\..\src\DeskHush.Core\DeskHush.Core.csproj" />
     <ProjectReference Include="..\..\src\DeskHush.Windows\DeskHush.Windows.csproj" />
   </ItemGroup>
